@@ -68,7 +68,7 @@ async function getSections(input) {
   return result;
 }
 
-// Gets the Campus codes (Can probably cache this as well)
+// Gets the Campus codes 
 async function getCodes() {
   let campusParam = {
     "school": "temple",
@@ -87,50 +87,56 @@ async function getCodes() {
 }
 
 // Formats the class information for the database
-async function formatClasses(sections, campuses, event) {
+async function formatSections(sections, event) {
 
-    // Loops through the payload (Need to change the for loop values)
-    for (var index = 0; index < 25; index++) {
-      var value = index + parseInt(event.params.offset,10);
+    // Iterates through all the sections
+    for (var sectionIndex = 0; sectionIndex < 25; sectionIndex++) {
+      var value = sectionIndex + parseInt(event.params.offset,10);
       if(value == sections.totalCount) {
         break;
       }
-      var len = sections.data[index].meetingsFaculty.length;
-      var times = [];
+
+      // Gets all needed information for all the meeting times of a section
+      var meetingTimes = [];
+      var meetingLength = sections.data[sectionIndex].meetingsFaculty.length;
   
-      for (var index2 = 0; index2 < len; index2++) {
+      for (var meetingIndex = 0; meetingIndex < meetingLength; meetingIndex++) {
         
-        // Calculates how many weeks for each course
-        var start = sections.data[index].meetingsFaculty[index2].meetingTime.startDate;
-        var end = sections.data[index].meetingsFaculty[index2].meetingTime.endDate;
+        // Calculates how many weeks for each meeting time
+        var start = sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.startDate;
+        var end = sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.endDate;
         var diff = weekDiff(start, end);
         
-        // Gets faculty information for each course
-        var staff = [];
+        // Finds campus code for each meeting time
         var campus;
-        var len3 = campuses.length;
-        for(var i = 0; i < len3; i++) {
-          if(String(sections.data[index].campusDescription).localeCompare(String(campuses[i].description)) == 0) {
-            campus = campuses[i].code;
+
+        var campusesLength = campuses.length;
+        for(var index = 0; index < campusesLength; index++) {
+          if(String(sections.data[sectionIndex].campusDescription).localeCompare(String(campuses[index].description)) == 0) {
+            campus = campuses[index].code;
           }
        }
           
-        var len2 = sections.data[index].faculty.length;
-        for(var j = 0; j < len2; j++) {
-          staff.push(sections.data[index].faculty[j].displayName);
+        // Gets faculty information for each meeting time
+        var staff = [];
+        var facultyLength = sections.data[sectionIndex].faculty.length;
+
+        for(index = 0; index < facultyLength; index++) {
+          staff.push(sections.data[sectionIndex].faculty[index].displayName);
         }
         
+        // Gets start and end time for each meeting time
         let startTime;
         let finishTime;
         
         try {
-          startTime = Number(sections.data[index].meetingsFaculty[index2].meetingTime.beginTime);
+          startTime = Number(sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.beginTime);
         } catch (err) {
           startTime = 'N/A';
         }
         
          try {
-          finishTime = Number(sections.data[index].meetingsFaculty[index2].meetingTime.endTime);
+          finishTime = Number(sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.endTime);
         } catch (err) {
           finishTime = 'N/A';
         }
@@ -139,39 +145,40 @@ async function formatClasses(sections, campuses, event) {
         const items = {
           startTime: startTime,
           endTime: finishTime,
-          startDate: String(sections.data[index].meetingsFaculty[index2].meetingTime.startDate),
-          endDate: String(sections.data[index].meetingsFaculty[index2].meetingTime.endDate),
-          building: sections.data[index].meetingsFaculty[index2].meetingTime.building,
-          room: sections.data[index].meetingsFaculty[index2].meetingTime.room,
+          startDate: String(sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.startDate),
+          endDate: String(sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.endDate),
+          building: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.building,
+          room: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.room,
           instructors: staff,
-          monday: sections.data[index].meetingsFaculty[index2].meetingTime.monday,
-          tuesday: sections.data[index].meetingsFaculty[index2].meetingTime.tuesday,
-          wednesday: sections.data[index].meetingsFaculty[index2].meetingTime.wednesday,
-          thursday: sections.data[index].meetingsFaculty[index2].meetingTime.thursday,
-          friday: sections.data[index].meetingsFaculty[index2].meetingTime.friday,
-          saturday: sections.data[index].meetingsFaculty[index2].meetingTime.saturday,
-          sunday: sections.data[index].meetingsFaculty[index2].meetingTime.sunday,
+          monday: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.monday,
+          tuesday: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.tuesday,
+          wednesday: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.wednesday,
+          thursday: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.thursday,
+          friday: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.friday,
+          saturday: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.saturday,
+          sunday: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.sunday,
           weeks: diff
         };
-        times.push(items);
+        meetingTimes.push(items);
       }
-      // The class format
-      const params = {
+
+      // The section format
+      const dbEntry = {
         TableName: "temple-202036",
         Item: {
-          courseName: (String(sections.data[index].subject) + '-' + String(sections.data[index].courseNumber)),
-          title: String(sections.data[index].courseTitle),
-          crn: Number(sections.data[index].courseReferenceNumber),
-          isOpen: sections.data[index].openSection,
+          courseName: (String(sections.data[sectionIndex].subject) + '-' + String(sections.data[sectionIndex].courseNumber)),
+          title: String(sections.data[sectionIndex].courseTitle),
+          crn: Number(sections.data[sectionIndex].courseReferenceNumber),
+          isOpen: sections.data[sectionIndex].openSection,
           campus: campus,
-          attributes: sections.data[index].sectionAttributes[0],
-          meetingTimes: times
+          attributes: sections.data[sectionIndex].sectionAttributes[0],
+          meetingTimes: meetingTimes
         }
       };
       
-    // Logs class data into the database
-    await putIntoDB(params);
-  
+    // Logs section data into the database
+    await putIntoDB(dbEntry);
+     
     }
 }
 
@@ -188,6 +195,6 @@ exports.handler = async(event) => {
     console.log("Cache Hit");
   }
   
-  // Calls format function
-  await formatClasses(sections, campuses, event);
+  // Formates each sections & logs it to the database
+  await formatSections(sections, event);
 };
