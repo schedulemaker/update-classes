@@ -48,13 +48,14 @@ async function invokeCampusLambda(params) {
 }
 
 // Puts items into database 
-async function putIntoDB(item) {
-  try {
-    const data = await cache.db.put(item).promise();
-    console.log(data);
-   } catch (err) {
-    console.log(err);
-   }
+async function putIntoDB(items) {
+  cache.db.batchWrite(items, function(err, data) {
+    if(err) {
+      console.log(err);
+    } else {
+      console.log(data);
+    }
+  }); 
 }
 
 // Gets the sections specified by event
@@ -82,12 +83,15 @@ async function getCodes() {
     InvocationType: 'RequestResponse',
     Payload: JSON.stringify(campusParam)
   };
-  const result = invokeCampusLambda(params);
+  const result = await invokeCampusLambda(params);
   return result;
 }
 
 // Formats the class information for the database
 async function formatSections(sections, event) {
+
+    // List of items to add
+    let items = [];
 
     // Iterates through all the sections
     for (var sectionIndex = 0; sectionIndex < 25; sectionIndex++) {
@@ -132,13 +136,13 @@ async function formatSections(sections, event) {
         try {
           startTime = Number(sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.beginTime);
         } catch (err) {
-          startTime = 'N/A';
+          startTime = -1;
         }
         
          try {
           finishTime = Number(sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.endTime);
         } catch (err) {
-          finishTime = 'N/A';
+          finishTime = -1;
         }
         
         // The meetingTimes format
@@ -164,22 +168,34 @@ async function formatSections(sections, event) {
 
       // The section format
       const dbEntry = {
-        TableName: "temple-202036",
-        Item: {
-          courseName: (String(sections.data[sectionIndex].subject) + '-' + String(sections.data[sectionIndex].courseNumber)),
-          title: String(sections.data[sectionIndex].courseTitle),
-          crn: Number(sections.data[sectionIndex].courseReferenceNumber),
-          isOpen: sections.data[sectionIndex].openSection,
-          campus: campus,
-          attributes: sections.data[sectionIndex].sectionAttributes[0],
-          meetingTimes: meetingTimes
+        PutRequest: {
+          Item: {
+            courseName: (String(sections.data[sectionIndex].subject) + '-' + String(sections.data[sectionIndex].courseNumber)),
+            title: String(sections.data[sectionIndex].courseTitle),
+            crn: Number(sections.data[sectionIndex].courseReferenceNumber),
+            isOpen: sections.data[sectionIndex].openSection,
+            campus: campus,
+            campusName: String(sections.data[sectionIndex].campusDescription),
+            attributes: sections.data[sectionIndex].sectionAttributes[0],
+            meetingTimes: meetingTimes
         }
-      };
-      
-    // Logs section data into the database
-    await putIntoDB(dbEntry);
-     
+      }
+    };
+
+    // Adds dbEntry to list of items to be added
+    items.push(dbEntry);   
+
     }
+
+    // Stores list of items
+    let params = {
+      RequestItems: {
+        'temple-202036': items
+    }
+};
+
+    // Calls function to log items into database
+    await putIntoDB(params);
 }
 
 exports.handler = async(event) => {
