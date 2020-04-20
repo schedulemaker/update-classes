@@ -1,11 +1,11 @@
 'use strict'
 
-// Need to change so it gets every class and add better variable names
-// also make a little more efficient and cleaner 
+if (typeof(cache) === 'undefined'){
+   var cache = require('./cache');
+}
 
-const AWS = require('aws-sdk');
-AWS.config.update({ region: "us-east-2" });
-let lambda = new AWS.Lambda();
+// List of campuses and codes
+var campuses;
 
 // Returns an array of weeks for each course
 function weekDiff(start, end) {
@@ -24,85 +24,198 @@ function weekDiff(start, end) {
 }
 
 // Calls the banner proxy and returns class info in JSON format
-const invokeLambda = async(params) => {
-  const data = await lambda.invoke(params).promise();
-  data.Payload = data.Payload.replace(/\+/g, '');
-  return JSON.parse(data.Payload);
+async function invokeLambda(params) {
+  try {
+    const data = await cache.lambda.invoke(params).promise();
+    data.Payload = data.Payload.replace(/\+/g, '');
+    return JSON.parse(data.Payload);
+  } catch (err) {
+      console.log(err);
+      return err;
+  }
 }
 
-exports.handler = async(event, context) => {
-  const db = new AWS.DynamoDB.DocumentClient({ region: "us-east-2" });
-  
+// Calls the banner proxy and returns campues names & codes
+async function invokeCampusLambda(params) {
+  try {
+    const data = await cache.campusLambda.invoke(params).promise();
+    data.Payload = data.Payload.replace(/\+/g, '');
+    return JSON.parse(data.Payload);
+  } catch (err) {
+      console.log(err);
+      return err;
+  }
+}
 
-  // Input for banner proxy lambda 
-  let input = {
+// Puts items into database 
+async function putIntoDB(params) {
+  try {
+    const result = await db.batchWrite(params).promise();
+    const unprocessed = Object.keys(result.data.UnprocessedItems).length;
+    if(unprocessed === 0){
+      console.log('Success');
+    }
+    else {
+      console.log(`${unprocessed} items not written`);
+    }
+  } catch (error) {
+    console.log(error);
+  }
+}
+
+// Gets the sections specified by event
+async function getSections(input) {
+   let params = {
     FunctionName: 'arn:aws:lambda:us-east-2:741865850980:function:banner-proxy:live',
     InvocationType: 'RequestResponse',
-    Payload: JSON.stringify(event)
+    Payload: JSON.stringify(input)
+  };
+  const result = await invokeLambda(params);
+  return result;
+}
+
+// Gets the Campus codes 
+async function getCodes() {
+  let campusParam = {
+    "school": "temple",
+    "term": 202036,
+    "method": "getCampuses",
+    "params": {}
   };
 
- // Invokes the banner lambda and gets the payload
-  const result = await invokeLambda(input);
+  let params = {
+    FunctionName: 'arn:aws:lambda:us-east-2:741865850980:function:banner-proxy:live',
+    InvocationType: 'RequestResponse',
+    Payload: JSON.stringify(campusParam)
+  };
+  const result = await invokeCampusLambda(params);
+  return result;
+}
+
+// Formats the class information for the database
+async function formatSections(sections, event) {
+
+    // List of items to add
+    let items = [];
+
+    // Iterates through all the sections
+    for (var sectionIndex = 0; sectionIndex < 25; sectionIndex++) {
+      var value = sectionIndex + parseInt(event.params.offset,10);
+      if(value == sections.totalCount) {
+        break;
+      }
+
+      // Gets all needed information for all the meeting times of a section
+      var meetingTimes = [];
+      var meetingLength = sections.data[sectionIndex].meetingsFaculty.length;
   
+      for (var meetingIndex = 0; meetingIndex < meetingLength; meetingIndex++) {
+        
+        // Calculates how many weeks for each meeting time
+        var start = sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.startDate;
+        var end = sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.endDate;
+        var diff = weekDiff(start, end);
+        
+        // Finds campus code for each meeting time
+        var campus;
 
-  // Loops through the payload (Need to change the for loop values)
-  for (var index = parseInt(event.params.offset); index < parseInt(event.params.pageSize); index++) {
-    if(index == result.totalCount) {
-      break;
-    }
-    var len = result.data[index].meetingsFaculty.length;
-    var times = [];
+        var campusesLength = campuses.length;
+        for(var index = 0; index < campusesLength; index++) {
+          if(String(sections.data[sectionIndex].campusDescription).localeCompare(String(campuses[index].description)) == 0) {
+            campus = campuses[index].code;
+          }
+       }
+          
+        // Gets faculty information for each meeting time
+        var staff = [];
+        var facultyLength = sections.data[sectionIndex].faculty.length;
 
-    for (var index2 = 0; index2 < len; index2++) {
-      // Calculates how many weeks for each course
-      var start = result.data[index].meetingsFaculty[index2].meetingTime.startDate;
-      var end = result.data[index].meetingsFaculty[index2].meetingTime.endDate;
-      var diff = weekDiff(start, end);
-      
-      // Gets faculty information for each course
-      var staff = [];
-      var len2 = result.data[index].faculty.length;
-      for(var j = 0; j < len2; j++) {
-        staff.push(result.data[index].faculty[j].displayName);
+        for(index = 0; index < facultyLength; index++) {
+          staff.push(sections.data[sectionIndex].faculty[index].displayName);
+        }
+        
+        // Gets start and end time for each meeting time
+        let startTime;
+        let finishTime;
+        
+        try {
+          startTime = Number(sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.beginTime);
+        } catch (err) {
+          startTime = -1;
+        }
+        
+         try {
+          finishTime = Number(sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.endTime);
+        } catch (err) {
+          finishTime = -1;
+        }
+        
+        // The meetingTimes format
+        const items = {
+          startTime: startTime,
+          endTime: finishTime,
+          startDate: String(sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.startDate),
+          endDate: String(sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.endDate),
+          building: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.building,
+          room: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.room,
+          instructors: staff,
+          monday: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.monday,
+          tuesday: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.tuesday,
+          wednesday: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.wednesday,
+          thursday: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.thursday,
+          friday: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.friday,
+          saturday: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.saturday,
+          sunday: sections.data[sectionIndex].meetingsFaculty[meetingIndex].meetingTime.sunday,
+          weeks: diff
+        };
+        meetingTimes.push(items);
       }
-      
-      // The meetingTimes format
-      const items = {
-        startTime: result.data[index].meetingsFaculty[index2].meetingTime.beginTime,
-        endTime: result.data[index].meetingsFaculty[index2].meetingTime.endTime,
-        building: result.data[index].meetingsFaculty[index2].meetingTime.building,
-        room: result.data[index].meetingsFaculty[index2].meetingTime.room,
-        instructors: staff,
-        monday: result.data[index].meetingsFaculty[index2].meetingTime.monday,
-        tuesday: result.data[index].meetingsFaculty[index2].meetingTime.tuesday,
-        wednesday: result.data[index].meetingsFaculty[index2].meetingTime.wednesday,
-        thursday: result.data[index].meetingsFaculty[index2].meetingTime.thursday,
-        friday: result.data[index].meetingsFaculty[index2].meetingTime.friday,
-        saturday: result.data[index].meetingsFaculty[index2].meetingTime.saturday,
-        sunday: result.data[index].meetingsFaculty[index2].meetingTime.sunday,
-        weeks: diff
+
+      // The section format
+      const dbEntry = {
+        PutRequest: {
+          Item: {
+            courseName: (String(sections.data[sectionIndex].subject) + '-' + String(sections.data[sectionIndex].courseNumber)),
+            title: String(sections.data[sectionIndex].courseTitle),
+            crn: Number(sections.data[sectionIndex].courseReferenceNumber),
+            isOpen: sections.data[sectionIndex].openSection,
+            campus: campus,
+            campusName: String(sections.data[sectionIndex].campusDescription),
+            attributes: sections.data[sectionIndex].sectionAttributes[0],
+            meetingTimes: meetingTimes
+        }
       }
-      times.push(items);
+    };
+
+    // Adds dbEntry to list of items to be added
+    items.push(dbEntry);   
+
     }
-    // The class format
-    const params = {
-      TableName: "temple-202036",
-      Item: {
-        courseName: result.data[index].courseTitle,
-        crn: parseInt(result.data[index].courseReferenceNumber),
-        isOpen: result.data[index].openSection,
-        campus: result.data[index].campusDescription,
-        attributes: result.data[index].sectionAttributes[0],
-        meetingTimes: times
-      }
+
+    // Stores list of items
+    let params = {
+      RequestItems: {
+        'temple-202036': items
     }
-    
-  // Logs class data into the database
-  try {
-    const data = await db.put(params).promise();
-    console.log(data);
-   } catch (err) {
-    console.log(err);
-   }
+};
+
+    // Calls function to log items into database
+    await putIntoDB(params);
+}
+
+exports.handler = async(event) => {
+
+  // Gets the sections specified
+  const sections = await getSections(event);
+  
+  // Gets the campus codes
+  if(typeof campuses == 'undefined') {
+    campuses = await getCodes();
+    console.log("Cache Miss");
+  } else {
+    console.log("Cache Hit");
   }
+  
+  // Formates each sections & logs it to the database
+  await formatSections(sections, event);
 };
