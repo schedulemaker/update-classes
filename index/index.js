@@ -51,7 +51,7 @@ async function invokeCampusLambda(params) {
 async function putIntoDB(params) {
   try {
     const result = await db.batchWrite(params).promise();
-    const unprocessed = Object.keys(result.data.UnprocessedItems).length;
+    const unprocessed = Object.keys(result.UnprocessedItems).length;
     if(unprocessed === 0){
       console.log('Success');
     }
@@ -195,7 +195,7 @@ async function formatSections(sections, event) {
     // Stores list of items
     let params = {
       RequestItems: {
-        'temple-202036': items
+        [`${event.school}-${event.term}`]: items
     }
 };
 
