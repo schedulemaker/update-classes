@@ -48,14 +48,19 @@ async function invokeCampusLambda(params) {
 }
 
 // Puts items into database 
-async function putIntoDB(items) {
-  cache.db.batchWrite(items, function(err, data) {
-    if(err) {
-      console.log(err);
-    } else {
-      console.log(data);
+async function putIntoDB(params) {
+  try {
+    const result = await db.batchWrite(params).promise();
+    const unprocessed = Object.keys(result.data.UnprocessedItems).length;
+    if(unprocessed === 0){
+      console.log('Success');
     }
-  }); 
+    else {
+      console.log(`${unprocessed} items not written`);
+    }
+  } catch (error) {
+    console.log(error);
+  }
 }
 
 // Gets the sections specified by event
