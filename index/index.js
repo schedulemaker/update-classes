@@ -50,7 +50,7 @@ async function invokeCampusLambda(params) {
 // Puts items into database 
 async function putIntoDB(params) {
   try {
-    const result = await db.batchWrite(params).promise();
+    const result = await cache.db.batchWrite(params).promise();
     const unprocessed = Object.keys(result.data.UnprocessedItems).length;
     if(unprocessed === 0){
       console.log('Success');
