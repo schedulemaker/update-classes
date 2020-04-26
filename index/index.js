@@ -50,7 +50,7 @@ async function invokeCampusLambda(params) {
 // Puts items into database 
 async function putIntoDB(params) {
   try {
-    const result = await db.batchWrite(params).promise();
+    const result = await cache.db.batchWrite(params).promise();
     const unprocessed = Object.keys(result.UnprocessedItems).length;
     if(unprocessed === 0){
       console.log('Success');
@@ -131,7 +131,11 @@ async function formatSections(sections, event) {
         var facultyLength = sections.data[sectionIndex].faculty.length;
 
         for(index = 0; index < facultyLength; index++) {
-          staff.push(sections.data[sectionIndex].faculty[index].displayName);
+          var data = {
+            Name: sections.data[sectionIndex].faculty[index].displayName,
+            ID: Number(sections.data[sectionIndex].faculty[index].bannerId)
+          };
+          staff.push(data);
         }
         
         // Gets start and end time for each meeting time
